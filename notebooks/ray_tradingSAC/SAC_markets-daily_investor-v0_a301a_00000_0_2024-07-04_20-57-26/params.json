@@ -1,0 +1,29 @@
+{
+  "callbacks": "<class '__main__.MyCustomCallbacks'>",
+  "env": "markets-daily_investor-v0",
+  "env_config": {
+    "background_config": "flash_crash",
+    "background_config_extra_kvargs": {
+      "mm_agent_params": "<abides_markets.configs.agent_params.MarketMakerAgentConfig object at 0x77ff7bcc7760>",
+      "momentum_agent_params": "<abides_markets.configs.agent_params.MomentumAgentConfig object at 0x77ff7bcdb9a0>",
+      "num_long_momentum_agents": 5,
+      "num_mm_agents": 19,
+      "num_noise_agents": 15,
+      "num_short_momentum_agents": 5,
+      "num_value_agents": 10,
+      "oracle_params": "<abides_markets.configs.agent_params.GBMOracleConfig object at 0x77ff7bcc7c40>",
+      "value_agent_params": "<abides_markets.configs.agent_params.ValueAgentConfig object at 0x77ff7bd7f880>"
+    },
+    "done_ratio": -Infinity,
+    "first_interval": "00:00:01",
+    "mkt_close": "09:35:00",
+    "order_fixed_size": 5000000000,
+    "reward_lookback": 8,
+    "state_history_length": 8,
+    "timestep_duration": "1s"
+  },
+  "framework": "torch",
+  "num_workers": 7,
+  "observation_filter": "MeanStdFilter",
+  "timesteps_per_iteration": 1000
+}

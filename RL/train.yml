@@ -1,0 +1,39 @@
+#TRAIN 
+
+config_extra:
+  framework: "torch"
+  timesteps_per_iteration: 1000
+  observation_filter: "MeanStdFilter"
+  num_workers: 5
+  gamma: 1
+
+#Flash Crash env config
+# env_config:
+#   background_config: "flash_crash"
+#   background_config_extra_kvargs: "changes_fc"
+#   timestep_duration: "1s"
+#   mkt_close: "09:40:00"
+#   first_interval: "00:00:01"
+#   done_ratio: "-inf"
+#   order_fixed_size: 300
+#   stabalise_mode: False
+
+# env_config:
+#   background_config: "rmsc06"
+#   #background_config_extra_kvargs: "changes_fc"
+#   timestep_duration: 1e5
+#   mkt_close: "09:45:00"
+#   first_interval: "00:00:01"
+#   done_ratio: "-inf"
+#   order_fixed_size: 300
+#   stabalise_mode: False
+
+#Ordinary config
+env_config:
+  order_fixed_size: 100
+  #timestep_duration: 1e5
+
+run_settings:
+  agent_type: PG
+  iterations: 100
+  
