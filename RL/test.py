@@ -36,7 +36,7 @@ class policyRL:
     get the best policy from training {name_xp}
     Use this policy to compute action
     """
-    def __init__(self, config_extra, path):
+    def __init__(self, config_extra, env_config, path):
         self.name = 'rl'
         ##### LOADING POLICY 
         # cell specific to ray to 
@@ -58,6 +58,7 @@ class policyRL:
         elif 'PG' in path:
             config = pg.DEFAULT_CONFIG.copy()
             config.update(config_extra)
+            config['env_config'].update(env_config)
             self.trainer = pg.PGTrainer(config=config, env="markets-daily_investor-v0")
         elif 'DDPG' in path:
             config = ddpg.DEFAULT_CONFIG.copy()
@@ -87,11 +88,16 @@ class policyRL:
         return '.'+self.best_trial_path[8:]
     
 class policyPassive:
-    def __init__(self):
+    def __init__(self, continuous):
         self.name = 'passive'
+        self.continuous = continuous
         
     def get_action(self, state):
-        return 1
+        
+        if not self.continuous:
+            return 1
+        else:
+            return np.array([0])
         
 class policyAggressive:
     def __init__(self):
@@ -107,6 +113,13 @@ class policyTimid:
     def get_action(self, state):
         return 2
 
+class policyRandom:
+    def __init__(self):
+        self.name = 'random'
+        
+    def get_action(self, state):
+        return np.random.choice([0,2])
+    
 def test_ray_model(policy, seed, env):
 
     env.seed(seed)
@@ -122,16 +135,20 @@ def test_ray_model(policy, seed, env):
     'total_reward': [], 'bid_volume': [], 'ask_volume': []
     }
 
+    buy_count = 0
+    hold_count = 0
+    sell_count = 0
 
     cnt = 0
     while not done:
         action = policy.get_action(state)
+        print(action)
         state, reward, done, info = env.step(action)
         total_reward += reward
         if not cnt % 100:
             print('iteration:', cnt)
-
         cnt += 1
+
         test_data['last_transaction'].append(info['last_transaction'])
         test_data['best_bid'].append(info['best_bid'])
         test_data['best_ask'].append(info['best_ask'])
@@ -143,8 +160,8 @@ def test_ray_model(policy, seed, env):
         test_data['holdings'].append(info['holdings'])
         test_data['orderbook'].append(info['orderbook'])
         test_data['order_status'].append(info['order_status'])
-        test_data['mkt_open'].append(info['mkt_open'])
-        test_data['mkt_close'].append(info['mkt_close'])
+        test_data['mkt_open'] = info['mkt_open']
+        test_data['mkt_close'] = info['mkt_close']
         test_data['last_bid'].append(info['last_bid'])
         test_data['last_ask'].append(info['last_ask'])
         test_data['wide_spread'].append(info['wide_spread'])
@@ -157,66 +174,247 @@ def test_ray_model(policy, seed, env):
         test_data['action'].append(action)
         test_data['reward'].append(reward)
         test_data['total_reward'].append(total_reward)
+        test_data['stop_hold_values'] = info['stop_hold_values']
+        test_data['stop_short_values'] = info['stop_short_values']
+        test_data['first_interval'] = info['first_interval']
+        test_data['stabalise2_values'] = info['stabalise2_values']
 
     return test_data
 
-def plot_market_discrete(test_data, save_dir, passive, marker_size = 3):
+# def plot_market(test_data, save_dir, passive, continuous=False, marker_size = 10):
 
-    colors = {0: 'r', 2: 'b'}  # 0 for Buy (red), 2 for Sell (blue)
-    color_map = [colors.get(int(action), None) for action in test_data['action']]
-    
-    buy_patch = mpatches.Patch(color='r', label='Buy')
-    sell_patch = mpatches.Patch(color='b', label='Sell')
+#     if not continuous:
 
-    plt.legend(handles=[buy_patch, sell_patch])
-    plt.plot(range(len(test_data['last_transaction'])), test_data['last_transaction'], label='Last Transaction Price')
+#         colors = {0: 'r', 2: 'b'}  # 0 for Buy (red), 2 for Sell (blue)
+#         color_map = [colors.get(int(action), None) for action in test_data['action']]
+        
+#         buy_patch = mpatches.Patch(color='r', label='Buy')
+#         sell_patch = mpatches.Patch(color='b', label='Sell')
 
-    # Scatter only for actions 0 (Buy) and 2 (Sell)
-    for idx, (action, price) in enumerate(zip(test_data['action'], test_data['last_transaction'])):
-        if action in colors:
-            plt.scatter(idx, price, color=colors[action], s=marker_size)
+#         plt.legend(handles=[buy_patch, sell_patch])
+#         plt.plot(range(len(test_data['last_transaction'])), test_data['last_transaction'], label='Last Transaction Price')
 
-    plt.xlabel('Time')
-    plt.ylabel('Asset Price')
-    plt.title('Best Transaction Prices with Action-Based Colors')
-    #plt.show()
+#         # Scatter only for actions 0 (Buy) and 2 (Sell)
+#         for idx, (action, price) in enumerate(zip(test_data['action'], test_data['last_transaction'])):
+#             if action in colors:
+#                 plt.scatter(idx, price, color=colors[action], s=marker_size)
+
+#     else:
+
+#         def get_color(action):
+
+#             action_value = action[0]
+
+#             if action_value < 0:
+#                 return (0, 0, 1)  # Red with intensity proportional to action
+#             elif action_value > 0:
+#                 return (1, 0, 0)  # Blue with intensity proportional to action
+#             else:
+#                 return (0, 0, 0, 0)  # Transparent for neutral action
+
+#         buy_patch = mpatches.Patch(color='red', label='Buy')
+#         sell_patch = mpatches.Patch(color='blue', label='Sell')
+
+#         plt.legend(handles=[buy_patch, sell_patch])
+#         plt.plot(range(len(test_data['last_transaction'])), test_data['last_transaction'], label='Last Transaction Price')
+
+#         # Scatter plot with colors based on action values
+#         for idx, (action, price) in enumerate(zip(test_data['action'], test_data['last_transaction'])):
+#             plt.scatter(idx, price, color=get_color(action), s=marker_size)
+
+#     if test_data['stop_hold_values']:
+
+#             for idx, stop_value in enumerate(test_data['stop_hold_values']):
+#                 if stop_value == 1:
+#                     plt.scatter(idx, test_data['last_transaction'][idx], color='g', marker='x', s=150)
+
+#     if test_data['stop_short_values']:
+
+#         for idx, stop_value in enumerate(test_data['stop_short_values']):
+#             if stop_value == 1:
+#                 plt.scatter(idx, test_data['last_transaction'][idx], color='black', marker='x', s=150)
+
+#     plt.xlabel('Time')
+#     plt.ylabel('Asset Price')
+#     plt.title('Best Transaction Prices with Action-Based Colors')
+#     #plt.show()
+#     if not passive:
+#         image_path = os.path.join(save_dir, 'market_plot.png')
+#     else:
+#         image_path = os.path.join(save_dir, 'market_plot_passive.png')
+#     plt.savefig(image_path)
+#     plt.close()
+
+def plot_market(test_data, save_dir, passive, continuous=False, marker_size=10):
+    start = test_data['mkt_open']+test_data['first_interval']
+    end = test_data['mkt_close']
+
+    num_ticks = len(test_data['last_transaction'])
+    time_mesh = np.linspace(start, end, num_ticks)
+
+    fig, ax = plt.subplots(figsize=(9,8))
+
+    if not continuous:
+        colors = {0: 'r', 2: 'b'}  # 0 for Buy (red), 2 for Sell (blue)
+        
+        # Creating the color map for scatter plot
+        color_map = [colors.get(int(action), None) for action in test_data['action']]
+
+        buy_patch = mpatches.Patch(color='r', label='Buy')
+        sell_patch = mpatches.Patch(color='b', label='Sell')
+
+        ax.plot(time_mesh, test_data['last_transaction'], label='Last Transaction Price')
+
+        updated_values = test_data['action']
+        if 'stabalise2_values' in test_data and test_data['stabalise2_values'] is not None:
+            print('STABALISE2 PLOTTING')
+            print(test_data['stabalise2_values'][::-1])
+            for i in range(len(test_data['stabalise2_values'])):
+                if test_data['stabalise2_values'][i] == 0 or test_data['stabalise2_values'][i] == 2:
+                    updated_values[i] = test_data['stabalise2_values'][i]
+
+        # Scatter only for actions 0 (Buy) and 2 (Sell)
+        for idx, (time, action, price) in enumerate(zip(time_mesh, updated_values, test_data['last_transaction'])):
+            if action in colors:
+                ax.scatter(time, price, color=colors[action], s=marker_size)
+
+        ax.legend(handles=[buy_patch, sell_patch], loc='best')
+
+    else:
+        def get_color(action):
+            action_value = action[0]
+
+            if action_value < 0:
+                return (0, 0, 1)  # Blue
+            elif action_value > 0:
+                return (1, 0, 0)  # Red
+            else:
+                return (0, 0, 0, 0)  # Transparent for neutral action
+
+        buy_patch = mpatches.Patch(color='red', label='Buy')
+        sell_patch = mpatches.Patch(color='blue', label='Sell')
+
+        ax.plot(time_mesh, test_data['last_transaction'], label='Last Transaction Price')
+
+        # Scatter plot with colors based on action values
+        for idx, (time, action, price) in enumerate(zip(time_mesh, test_data['action'], test_data['last_transaction'])):
+            ax.scatter(time, price, color=get_color(action), s=marker_size)
+
+        ax.legend(handles=[buy_patch, sell_patch], loc='best')
+
+    if 'stop_hold_values' in test_data and test_data['stop_hold_values'] is not None:
+        for idx, (time,stop_value) in enumerate(zip(time_mesh,test_data['stop_hold_values'])):
+            if stop_value == 1:
+                ax.scatter(time, test_data['last_transaction'][idx], color='g', marker='x', s=150)
+
+    if 'stop_short_values' in test_data and test_data['stop_short_values'] is not None:
+        for idx, (time,stop_value) in enumerate(zip(time_mesh,test_data['stop_short_values'])):
+            if stop_value == 1:
+                ax.scatter(time, test_data['last_transaction'][idx], color='black', marker='x', s=150)
+
     if not passive:
         image_path = os.path.join(save_dir, 'market_plot.png')
     else:
         image_path = os.path.join(save_dir, 'market_plot_passive.png')
+
+    ax.set_ylabel("Price")
+    ax.set_xlabel("Time")
+    ax.set_title('Transaction Prices')
+
+    ax.set_xlim(start, end)
+
+    num_ticks2 = min(10,len(test_data['last_transaction']))
+    time_mesh2 = np.linspace(start, end, num_ticks2)
+    ax.set_xticks(time_mesh2)
+    ax.set_xticklabels([fmt_ts(time).split(" ")[1] for time in time_mesh2], rotation=60)
+
     plt.savefig(image_path)
+    plt.show()
+
     plt.close()
 
 def plot_total_reward(test_data, save_dir):
 
-    plt.plot(test_data['total_reward'])
-    plt.title('Total Reward')
-    plt.xlabel('Time')
-    plt.ylabel('Reward')
-    plt.axhline(y=0, color='r', linestyle='--')
+    start = test_data['mkt_open'] + test_data['first_interval']
+    end = test_data['mkt_close']
+
+    num_ticks = len(test_data['total_reward'])
+    time_mesh = np.linspace(start, end, num_ticks)
+
+    fig, ax = plt.subplots(figsize=(9, 8))
+
+    ax.plot(time_mesh, test_data['total_reward'])
+    ax.set_title('Total Reward')
+    ax.set_xlabel('Time')
+    ax.set_ylabel('Reward')
+    ax.axhline(y=0, color='r', linestyle='--')
+
+    ax.set_xlim(start, end)
+
+    num_ticks2 = min(10, len(test_data['total_reward']))
+    time_mesh2 = np.linspace(start, end, num_ticks2)
+    ax.set_xticks(time_mesh2)
+    ax.set_xticklabels([fmt_ts(time).split(" ")[1] for time in time_mesh2], rotation=60)
+
     image_path = os.path.join(save_dir, 'total_reward_plot.png')
     plt.savefig(image_path)
+    plt.show()
+
     plt.close()
 
 def plot_reward(test_data, save_dir):
+    start = test_data['mkt_open'] + test_data['first_interval']
+    end = test_data['mkt_close']
 
-    plt.plot(test_data['reward'])
-    plt.title('Reward')
-    plt.xlabel('Time')
-    plt.axhline(y=0, color='r', linestyle='--')
-    plt.ylabel('Reward')
+    num_ticks = len(test_data['reward'])
+    time_mesh = np.linspace(start, end, num_ticks)
+
+    fig, ax = plt.subplots(figsize=(9, 8))
+
+    ax.scatter(time_mesh, test_data['reward'])
+    ax.set_title('Reward')
+    ax.set_xlabel('Time')
+    ax.set_ylabel('Reward')
+    ax.axhline(y=0, color='r', linestyle='--')
+
+    ax.set_xlim(start, end)
+
+    num_ticks2 = min(10, len(test_data['reward']))
+    time_mesh2 = np.linspace(start, end, num_ticks2)
+    ax.set_xticks(time_mesh2)
+    ax.set_xticklabels([fmt_ts(time).split(" ")[1] for time in time_mesh2], rotation=60)
+
     image_path = os.path.join(save_dir, 'reward_plot.png')
     plt.savefig(image_path)
+    plt.show()
+
     plt.close()
 
 def plot_marked_to_market(test_data, save_dir):
+    start = test_data['mkt_open'] + test_data['first_interval']
+    end = test_data['mkt_close']
 
-    plt.plot(test_data['marked_to_market'])
-    plt.title('Marked to Market')
-    plt.xlabel('Time')
-    plt.ylabel('Value')
+    num_ticks = len(test_data['marked_to_market'])
+    time_mesh = np.linspace(start, end, num_ticks)
+
+    fig, ax = plt.subplots(figsize=(9, 8))
+
+    ax.plot(time_mesh, test_data['marked_to_market'])
+    ax.set_title('Marked to Market')
+    ax.set_xlabel('Time')
+    ax.set_ylabel('Value')
+
+    ax.set_xlim(start, end)
+
+    num_ticks2 = min(10, len(test_data['marked_to_market']))
+    time_mesh2 = np.linspace(start, end, num_ticks2)
+    ax.set_xticks(time_mesh2)
+    ax.set_xticklabels([fmt_ts(time).split(" ")[1] for time in time_mesh2], rotation=60)
+
     image_path = os.path.join(save_dir, 'marked_to_market_plot.png')
     plt.savefig(image_path)
+    plt.show()
+
     plt.close()
     
 def calculate_volatility(price_series):
@@ -261,6 +459,11 @@ def market_indicators(test_data):
                                 'min_price': min_price, 'max_price': max_price }
     indicators['volume'] = volume
     indicators['total_reward'] = test_data['total_reward'][-1]
+    indicators['marked_to_market'] = test_data['marked_to_market']
+    indicators['bid_volume'] = test_data['bid_volume']
+    indicators['ask_volume'] = test_data['ask_volume']
+    indicators['last_transaction'] = test_data['last_transaction']
+    indicators['spread'] = test_data['spread']
 
     return indicators
 
@@ -284,11 +487,11 @@ def save_dict_to_pkl(file_path, dictionary):
     with open(file_path, 'wb') as file:
         pickle.dump(dictionary, file)
     
-def get_analytics(test_data, save_dir, passive, path):
+def get_analytics(test_data, save_dir, passive, continuous, path):
 
     shutil.copy(os.path.join(path, 'params.json'), os.path.join(save_dir, 'params.json'))
     save_dict_to_pkl(os.path.join(save_dir, 'test_data.pkl'), test_data)
-    plot_market_discrete(test_data, save_dir, passive=False)
+    plot_market(test_data, save_dir, passive=False, continuous=continuous)
     plot_total_reward(test_data, save_dir)
     plot_reward(test_data, save_dir)
     plot_marked_to_market(test_data, save_dir)
@@ -298,10 +501,10 @@ def get_analytics(test_data, save_dir, passive, path):
 
     if passive:
 
-        test_data_passive = test_ray_model(policyPassive(), seed=seed, env=env)
-        plot_market_discrete(test_data_passive, save_dir, passive=True)
+        test_data_passive = test_ray_model(policyPassive(continuous=continuous), seed=seed, env=env)
+        plot_market(test_data_passive, save_dir, passive=True, continuous=continuous)
         save_dict_to_pkl(os.path.join(save_dir, 'test_data_passive.pkl'), test_data_passive)
-
+        
         indicators_passive = market_indicators(test_data_passive)
         save_dict_to_json(os.path.join(save_dir, 'indicators_passive.json'), indicators_passive)
 
@@ -334,6 +537,7 @@ if __name__ == '__main__':
         experiment_data = json.load(file)
 
     env_config = experiment_data['env_config']
+    print(env_config)
     config_extra = experiment_data.copy()
     del config_extra['callbacks']
     del config_extra['env']
@@ -341,6 +545,14 @@ if __name__ == '__main__':
 
     if 'env_config' in test_config:
         env_config.update(test_config['env_config'])
+
+    print(env_config)
+
+    if ('continuous_mode' in env_config) and (env_config['continuous_mode']):
+        continuous = True
+        print('CONTINUOS IS TRUE')
+    else:
+        continuous = False
 
     if ('order_fixed_size' in env_config):
         env_config['order_fixed_size'] = int(float(env_config['order_fixed_size']))
@@ -352,17 +564,17 @@ if __name__ == '__main__':
     #if (env_config['background_config'] == "rmsc07") and (env_config['background_config'] == "flash_crash"):
 
         oracle_config = GBMOracleConfig(mu=1e-9, sigma=0.0135)
-        mm_config = MarketMakerAgentConfig(price_skew_param=4, wake_up_freq='1s', subscribe=False, subscribe_freq='1s', subscribe_num_levels=10)
+        mm_config = MarketMakerAgentConfig(price_skew_param=4, skew_beta=1e-4, pov=0.025, wake_up_freq='1s', subscribe=False, subscribe_freq='1s', subscribe_num_levels=10)
         # mm_config = MarketMakerAgentConfig(price_skew_param=4, wake_up_freq=1e9 * (5) , subscribe=False, subscribe_freq='1s', subscribe_num_levels=10)
-        value_agent_config = ValueAgentConfig(kappa_limit=0.3, kappa_mkt=0.1, mean_wakeup_gap=1e8)
+        value_agent_config = ValueAgentConfig(kappa_limit=0.3, kappa_mkt=0.1, mean_wakeup_gap=1e9)
         # value_agent_config = ValueAgentConfig(kappa_limit=0.3, kappa_mkt=0.1, mean_wakeup_gap=1e8 * (5))
         momentum_agent_config = MomentumAgentConfig(beta_limit=50, beta_mkt=20, wake_up_freq='1s', subscribe=False)
         # momentum_agent_config = MomentumAgentConfig(beta_limit=50, beta_mkt=20, wake_up_freq=1e9 * (5), subscribe=False)
         exchange_config = ExchangeConfig(log_orders=True)
-        institutional_config = InstitutionalTraderAgentConfig(inventory=1e13, sell_frequency="00:00:02", sell_volume_factor=1000)
+        institutional_config = InstitutionalTraderAgentConfig(inventory=1e6, sell_frequency='1s', sell_volume_factor=1000, trigger_time="09:30:02")
 
         changes_fc = {
-        "num_noise_agents": 15,
+        "num_noise_agents": 50,
         "num_value_agents": 10,
         "num_mm_agents": 19,
         "num_long_momentum_agents": 5,
@@ -371,15 +583,20 @@ if __name__ == '__main__':
         "mm_agent_params": mm_config,
         "value_agent_params": value_agent_config,
         "momentum_agent_params": momentum_agent_config,
-        "institutional_params": institutional_config
+        "institutional_params": institutional_config,
+        "exchange_params": exchange_config,
         }
 
         env_config['background_config_extra_kvargs'] = changes_fc
 
     env = gym.make("markets-daily_investor-v0", debug_mode=True, **env_config)
-    policy = policyRL(config_extra=config_extra, path=path)
 
+    policy = policyRL(config_extra=config_extra, env_config=env_config, path=path)
     best_trial_path = policy.get_directory()
+    # policy = policyPassive(continuous=False)
+    # policy = policyTimid()
+    # policy = policyRandom()
+    # best_trial_path = '.'+path[8:]
 
     if not experiment_mode:
 
@@ -389,9 +606,8 @@ if __name__ == '__main__':
                 save_dir += '_' + test_config['single_run_settings']['extra_name']
 
         os.makedirs(save_dir, exist_ok=True)
-        policy = policyTimid()
         test_data = test_ray_model(policy, seed=seed, env=env)
-        get_analytics(test_data, save_dir, passive, path)
+        get_analytics(test_data, save_dir, passive, continuous, path)
 
     else:
 
@@ -406,11 +622,11 @@ if __name__ == '__main__':
             test_data = test_ray_model(policy, seed=seed, env=env)
 
             if passive:
-                indicators, indicators_passive = get_analytics(test_data, save_dir, passive, path)
+                indicators, indicators_passive = get_analytics(test_data, save_dir, passive, continuous, path)
                 experiment_dict['passive'][seed] = indicators_passive
 
             else:
-                indicators = get_analytics(test_data, save_dir, passive, path)
+                indicators = get_analytics(test_data, save_dir, passive, continuous, path)
 
             experiment_dict['test'][seed] = indicators
 
