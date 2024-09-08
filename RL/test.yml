@@ -1,20 +1,34 @@
 #TEST
 
-# env_config:
-#   background_config: "rmsc07"
-#   mkt_close: "09:35:00"
+env_config:
+  # trailing_stop_mode: True
+  timestep_duration: 60s
+  order_fixed_size: 100
+  background_config: "rmsc04"
+  mkt_close: "16:00:00"
+  first_interval: "00:05:00"
+  done_ratio: "-inf"
+  # background_config_extra_kvargs: {}
+  # continuous_mode: True
+  # limit_order_prob: 1
 
-# single_run_settings:
-#   seed: 222
-#   path: ./models/ray_tradingPG/flash_crash_order_size=100
-#   passive: True
-  #extra_name:
-
-experiment:
-  experiment_name: experiment_flash_crash_order_size=1e2_with_passive
-  seed_number: 50
-  path: ./models/ray_tradingPG/flash_crash_order_size=100
+single_run_settings:
+  seed: 100
+  #path: ./models/ray_tradingPPO/PPO_markets-daily_investor-v0_5dfd5_00000_0_2024-07-05_18-52-38
+  #path: ./models/ray_tradingPPO/PPO_markets-daily_investor-v0_5dfd5_00000_0_2024-07-05_18-52-38
+  #path: ./models/ray_tradingPPO/PPO_markets-daily_investor-v0_5dfd5_00000_0_2024-07-05_18-52-38
+  #path: ./models/ray_tradingPPO/PPO_markets-daily_investor-v0_5dfd5_00000_0_2024-07-05_18-52-38
+  #path: ./models/ray_tradingPPO/PPO_markets-daily_investor-v0_5dfd5_00000_0_2024-07-05_18-52-38
+  path: ./models/ray_tradingPG/rmsc04_order_size=100_inf_2024-07-16_00-54-29
+  #path: ./models/ray_tradingPG/flash_crash_stabalise_size=1000_2024-07-25_18-01-40
   passive: True
+  extra_name: LIMIT_PROB_1_NO_CRASH_size=500_with_cancel
+
+# experiment:
+#   experiment_name: experiment_flash_crash_size=100_TS
+#   seed_number: 50
+#   path: ./models/ray_tradingPG/rmsc04_order_size=100_inf_2024-07-16_00-54-29
+#   passive: False
   #Make sure done ration is -inf
 
 # config_extra:
@@ -27,18 +41,21 @@ experiment:
 # env_config:
 #   background_config: "flash_crash"
 #   background_config_extra_kvargs: "changes_fc"
-#   timestep_duration: "1s"
-  # mkt_close: "09:40:00"
+#   timestep_duration: 1s
+#   mkt_close: "09:35:00"
 #   first_interval: "00:00:01"
 #   done_ratio: "-inf"
-#   order_fixed_size: "1e7"
-#   stabalise_mode: True
+  # stabalise_mode: True
+  # order_fixed_size: 100
+  # stabalise_mode2: True
+  # trailing_stop_mode: True
+  # trailing_percentage: 1
+  # limit_order_prob: 1
 
 # Ordinary config
 # env_config:
-#   done_ratio: "-inf"
-#   mkt_close: "16:00:00"
-#   order_fixed_size: 100
-  #timestep_duration: "10s"
+  # done_ratio: "-inf"
+  # mkt_close: "16:00:00"
+  # order_fixed_size: 100
 
   
