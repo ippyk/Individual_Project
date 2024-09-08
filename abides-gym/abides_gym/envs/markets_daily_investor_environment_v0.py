@@ -67,6 +67,12 @@ class SubGymMarketsDailyInvestorEnv_v0(AbidesGymMarketsEnv):
         background_config_extra_kvargs={},
         reward_lookback: int = 5,
         stabalise_mode: bool = False,
+        stabalise_mode2: bool = False,
+        continuous_mode: bool = False,
+        trailing_stop_mode: bool = False,
+        trailing_percentage: float = 5,
+        limit_order_prob: float = 0,
+
     ) -> None:
         self.background_config: Any = importlib.import_module(
             "abides_markets.configs.{}".format(background_config), package=None
@@ -91,7 +97,21 @@ class SubGymMarketsDailyInvestorEnv_v0(AbidesGymMarketsEnv):
         self.diffs = []
         self.holdings = deque(maxlen=1)
         self.cash = deque(maxlen=1)
-        self.stablise_mode = stabalise_mode
+        self.stabalise_mode = stabalise_mode
+        self.continuous_mode = continuous_mode
+        self.highest_price = None
+        self.lowest_price = None
+        self.trailing_percentage = trailing_percentage
+        self.stop_hold_values = []
+        self.stop_short_values = []
+        self.stabalise2_values = []
+        self.trailing_stop_mode = trailing_stop_mode
+        self.stop_hold_price = None
+        self.stop_short_price = None
+        self.stabalise_mode2 = stabalise_mode2
+        self.limit_order_prob = limit_order_prob
+        self.not_passive = False
+        self.order_time = None
 
         # CHECK PROPERTIES
         assert background_config in [
@@ -166,8 +186,12 @@ class SubGymMarketsDailyInvestorEnv_v0(AbidesGymMarketsEnv):
 
         # Action Space
         # MKT buy order_fixed_size | Hold | MKT sell order_fixed_size
-        self.num_actions: int = 3
-        self.action_space: gym.Space = gym.spaces.Discrete(self.num_actions)
+        if not self.continuous_mode:
+            self.num_actions: int = 3
+            self.action_space: gym.Space = gym.spaces.Discrete(self.num_actions)
+        else:
+            self.action_space: gym.Space = gym.spaces.Box(low=-1.0, high=1.0, shape=(1,), dtype=np.float32)
+
 
         # State Space
         # [Holdings, Imbalance, Spread, DirectionFeature] + padded_returns
@@ -208,6 +232,38 @@ class SubGymMarketsDailyInvestorEnv_v0(AbidesGymMarketsEnv):
         # instantiate previous_marked_to_market as starting_cash
         self.previous_marked_to_market = self.starting_cash
 
+        class LimitPriceModel:
+            def __init__(self, random_state, scale: float = 2.) -> None:
+                self.scale = scale
+                self.random_state = random_state
+
+            def sample(self, ref_prc: float, order_type) -> int:
+                if order_type == "BUY":
+                    return round(ref_prc - np.ceil(self.random_state.exponential(scale=self.scale)))
+                else:
+                    return round(ref_prc + np.ceil(self.random_state.exponential(scale=self.scale)))
+
+        self.limit_price_model = LimitPriceModel(random_state = self.np_random)
+
+    def place_order(self, order_type, size):
+
+        print('holdings', self.holdings)
+        indicator  = self.np_random.binomial(n=1, p=self.limit_order_prob)
+        if indicator:
+
+
+            if order_type == "BUY":
+                price = self.best_bid
+            else:
+                price = self.best_ask
+            print('LIMIT ORDER SUBMITTED')
+            return [{"type": "CCL_ALL"},{"type": "LMT", "direction": order_type, "size": size, "limit_price": price}]
+            #return [{"type": "LMT", "direction": order_type, "size": size, "limit_price": price}]
+        else:
+            return [{"type": "MKT", "direction": order_type, "size": size}]
+
+        return 
+
     def _map_action_space_to_ABIDES_SIMULATOR_SPACE(
         self, action: int
     ) -> List[Dict[str, Any]]:
@@ -224,16 +280,134 @@ class SubGymMarketsDailyInvestorEnv_v0(AbidesGymMarketsEnv):
         Returns:
             - action_list: list of the corresponding series of action mapped into abides env apis
         """
-        if action == 0:
-            return [{"type": "MKT", "direction": "BUY", "size": self.order_fixed_size}]
-        elif action == 1:
-            return []
-        elif action == 2:
-            return [{"type": "MKT", "direction": "SELL", "size": self.order_fixed_size}]
-        else:
-            raise ValueError(
-                f"Action {action} is not part of the actions supported by the function."
+        print('lt', self.last_transaction)
+        # print('hold price', self.stop_hold_price)
+        # print('highest price', self.highest_price)
+        # print('lowest price', self.lowest_price)
+        # print('short price', self.stop_short_price)
+        # print('action, holdings:', self.holdings)
+
+        # print('symbols', self.oracle.symbols)
+        # print('current time', self.current_time)
+
+        if self.stabalise_mode2:
+
+            obs_t = self.oracle.observe_price(
+            'ABM',
+            self.current_time[0],
+            random_state=np.random.RandomState(
+                    seed=np.random.randint(low=0, high=2**32, dtype="uint64")
+                ),
             )
+
+            print('fundamental value', obs_t)
+            print('mid price', self.mid_price)
+            
+            if self.not_passive:
+
+                if self.mid_price < 0.99*obs_t:
+                    print('STABILISE MODE 2 BUY')
+                    self.stabalise2_values.append(0)
+                    #return [{"type": "MKT", "direction": "BUY", "size": self.order_fixed_size}]
+                    return self.place_order("BUY", self.order_fixed_size)
+                elif self.mid_price > 1.01*obs_t:
+                    self.stabalise2_values.append(2)
+                    print('STABILISE MODE 2 SELL')
+                    #return [{"type": "MKT", "direction": "SELL", "size": self.order_fixed_size}]
+                    return self.place_order("SELL", self.order_fixed_size)
+                self.stabalise2_values.append(1)
+
+        if self.trailing_stop_mode:
+            print('holdings', self.holdings)
+            if self.holdings > 0:
+
+                if not self.highest_price:
+                    self.highest_price = self.last_transaction
+
+                self.stop_short_values.append(0)
+
+                self.stop_short_price = None
+                self.lowest_price = None
+                
+                if self.last_transaction > self.highest_price:
+                    self.highest_price = self.last_transaction
+                    self.stop_hold_price = self.last_transaction*(1-(self.trailing_percentage/100))
+
+                if not self.stop_hold_price:
+                    self.stop_hold_price = self.last_transaction*(1-(self.trailing_percentage/100))
+
+                if self.last_transaction < self.stop_hold_price:
+                    print('TRAILING HOLD STOP ACTIVATED')
+                    self.stop_hold_values.append(1)
+                    #return [{"type": "MKT", "direction": "SELL", "size": self.holdings}]
+                    return self.place_order("SELL", self.holdings)
+
+                
+                self.stop_hold_values.append(0)
+                
+            elif self.holdings < 0:
+
+                if not self.lowest_price:
+                    self.lowest_price = self.last_transaction
+
+                self.stop_hold_values.append(0)
+
+                self.stop_hold_price = None
+                self.highest_price = None
+
+                if self.last_transaction < self.lowest_price:
+                    self.lowest_price = self.last_transaction
+                    self.stop_short_price = self.last_transaction*(1+(self.trailing_percentage/100))
+
+                if not self.stop_short_price:
+                    self.stop_short_price = self.last_transaction*(1+(self.trailing_percentage/100))
+
+                if self.last_transaction > self.stop_short_price:
+                    print('TRAILING SHORT STOP ACTIVATED')
+                    self.stop_short_values.append(1)
+                    print("SELL AMOUNT", -self.holdings)
+                    #return [{"type": "MKT", "direction": "BUY", "size": -self.holdings}]
+                    return self.place_order("BUY", -self.holdings)
+
+                self.stop_short_values.append(0)
+
+            else:
+                self.stop_hold_values.append(0)
+                self.stop_short_values.append(0)
+                self.stop_short_price = None
+                self.stop_hold_price = None
+                self.lowest_price = None
+                self.highest_price = None
+
+
+        if not self.continuous_mode:
+
+            if action == 0:
+                #return [{"type": "MKT", "direction": "BUY", "size": self.order_fixed_size}]
+                return self.place_order("BUY", self.order_fixed_size)
+            elif action == 1:
+                return []
+            elif action == 2:
+                #return [{"type": "MKT", "direction": "SELL", "size": self.order_fixed_size}]
+                return self.place_order("SELL", self.order_fixed_size)
+            else:
+                raise ValueError(
+                    f"Action {action} is not part of the actions supported by the function."
+                )
+            
+        else:
+
+            action_value = action[0]
+            size = round(action_value * self.order_fixed_size)
+            print('order size:', size)
+            if size > 0:
+                #return [{"type": "MKT", "direction": "BUY", "size": size}]
+                return self.place_order("BUY", size)
+            elif size < 0:
+                #return [{"type": "MKT", "direction": "SELL", "size": -size}]
+                return self.place_order("SELL", -size)
+            else:
+                return []
 
     @raw_state_to_state_pre_process
     def raw_state_to_state(self, raw_state: Dict[str, Any]) -> np.ndarray:
@@ -252,9 +426,20 @@ class SubGymMarketsDailyInvestorEnv_v0(AbidesGymMarketsEnv):
         asks = raw_state["parsed_mkt_data"]["asks"]
         
         last_transactions = raw_state["parsed_mkt_data"]["last_transaction"]
+        self.last_transaction = last_transactions[-1]
+            # self.stop_price = self.last_transaction * (1-(self.trailing_percentage/100))
+        # print('lt', self.last_transaction)
 
         # 1) Holdings
         holdings = raw_state["internal_data"]["holdings"]
+        # print(holdings)
+        self.holdings = holdings[-1]
+        current_time = raw_state["internal_data"]["current_time"]
+        self.current_time = current_time
+        # print(current_time)
+
+        if (not self.not_passive) and (not self.holdings == 0):
+            self.not_passive = True
 
         # 2) Imbalance
         imbalances = [
@@ -267,6 +452,8 @@ class SubGymMarketsDailyInvestorEnv_v0(AbidesGymMarketsEnv):
             markets_agent_utils.get_mid_price(b, a, lt)
             for (b, a, lt) in zip(bids, asks, last_transactions)
         ]
+
+        self.mid_price = mid_prices[-1]
         returns = np.diff(mid_prices)
         padded_returns = np.zeros(self.state_history_length - 1)
         padded_returns[-len(returns) :] = (
@@ -283,6 +470,11 @@ class SubGymMarketsDailyInvestorEnv_v0(AbidesGymMarketsEnv):
             for (asks, mid) in zip(asks, mid_prices)
         ]
         spreads = np.array(best_asks) - np.array(best_bids)
+
+        # print('BEST BIDS', best_bids)
+        # print('BEST ASKS', best_asks)
+        self.best_bid = best_bids[-1]
+        self.best_ask = best_asks[-1]
 
         # 5) direction feature
         direction_features = np.array(mid_prices) - np.array(last_transactions)
@@ -306,7 +498,7 @@ class SubGymMarketsDailyInvestorEnv_v0(AbidesGymMarketsEnv):
         Returns:
             - reward: immediate reward computed at each step  for the daily investor v0 environnement
         """
-        if not self.stablise_mode:
+        if not self.stabalise_mode:
 
             if self.reward_mode == "dense":
                 # Sparse Reward here
@@ -349,49 +541,48 @@ class SubGymMarketsDailyInvestorEnv_v0(AbidesGymMarketsEnv):
         else:
 
             # Ippy stuff
-            # last_transaction = raw_state["parsed_mkt_data"]["last_transaction"]
-
-            # if not self.reward_deque:
-            #     reward = 0
-            # else:
-            #     reward = -np.abs(last_transaction-np.mean(self.reward_deque))
-
-            # self.reward_deque.append(last_transaction)
-
-            # #print(-reward)
-            # return reward
-
-            if not self.diffs:
-                return_std = 0
-            else:
-                return_std = np.std(self.diffs)
-
-            holdings = raw_state["internal_data"]["holdings"]
-            cash = raw_state["internal_data"]["cash"]
             last_transaction = raw_state["parsed_mkt_data"]["last_transaction"]
 
             if not self.reward_deque:
-                F = 0
+                reward = 0
             else:
-                F = 1 / (np.abs(last_transaction-np.mean(self.reward_deque)) + 0.1)
-
-            if len(self.reward_deque) > 1 and (self.reward_deque[-2] - self.reward_deque[-1] > return_std):
-                Q = (self.reward_deque[-2] - self.reward_deque[-1])
-                reward = F*Q
-            else:
-                if self.holdings and self.cash:
-                    reward = -np.abs(holdings-self.holdings[0])-np.abs(cash-self.cash[0])
-                else:
-                    reward = 0
-
-            if self.reward_deque:
-                self.diffs.append(last_transaction-self.reward_deque[-1])
-
+                reward = -np.abs(last_transaction-np.mean(self.reward_deque))
             self.reward_deque.append(last_transaction)
-            self.holdings.append(holdings)
-            self.cash.append(cash)
 
+            #print(-reward)
             return reward
+
+            # if not self.diffs:
+            #     return_std = 0
+            # else:
+            #     return_std = np.std(self.diffs)
+
+            # holdings = raw_state["internal_data"]["holdings"]
+            # cash = raw_state["internal_data"]["cash"]
+            # last_transaction = raw_state["parsed_mkt_data"]["last_transaction"]
+
+            # if not self.reward_deque:
+            #     F = 0
+            # else:
+            #     F = 1 / (np.abs(last_transaction-np.mean(self.reward_deque)) + 0.1)
+
+            # if len(self.reward_deque) > 1 and (self.reward_deque[-2] - self.reward_deque[-1] > return_std):
+            #     Q = (self.reward_deque[-2] - self.reward_deque[-1])
+            #     reward = F*Q
+            # else:
+            #     if self.holdings and self.cash:
+            #         reward = -np.abs(holdings-self.holdings[0])-np.abs(cash-self.cash[0])
+            #     else:
+            #         reward = 0
+
+            # if self.reward_deque:
+            #     self.diffs.append(last_transaction-self.reward_deque[-1])
+
+            # self.reward_deque.append(last_transaction)
+            # self.holdings.append(holdings)
+            # self.cash.append(cash)
+
+            # return reward
 
 
     @raw_state_pre_process
@@ -496,9 +687,13 @@ class SubGymMarketsDailyInvestorEnv_v0(AbidesGymMarketsEnv):
 
         # 6) Holdings
         holdings = raw_state["internal_data"]["holdings"]
+        #print('yo', holdings)
+        #self.holdings = holdings
 
         # 7) Spread
         spread = best_ask - best_bid
+
+        # print('SPREAD', spread)
 
         # 8) OrderBook features
         orderbook = {
@@ -512,8 +707,20 @@ class SubGymMarketsDailyInvestorEnv_v0(AbidesGymMarketsEnv):
                 orderbook[book_name]["price"][level] = np.array([price]).reshape(-1)
                 orderbook[book_name]["volume"][level] = np.array([volume]).reshape(-1)
 
+        # print('oderbook', orderbook)
+        # print('bids', bids)
+        # print('asks', asks)
+
         # 9) order_status
         order_status = raw_state["internal_data"]["order_status"]
+
+        # if isinstance(order_status, list):
+        #     print(order_status[-1])
+        # else:
+        #     print(order_status)
+        # print(order_status)
+        # key = max(order_status.keys())
+        # print('executed_qty', order_status[key])
 
         # 10) mkt_open
         mkt_open = raw_state["internal_data"]["mkt_open"]
@@ -532,6 +739,7 @@ class SubGymMarketsDailyInvestorEnv_v0(AbidesGymMarketsEnv):
 
         # 4) compute the marked to market
         marked_to_market = cash + holdings * last_transaction
+        print('profit', marked_to_market-1e6)
 
         total_volume = raw_state["parsed_volume_data"]["total_volume"]
         bid_volume = raw_state["parsed_volume_data"]["bid_volume"]
@@ -561,6 +769,10 @@ class SubGymMarketsDailyInvestorEnv_v0(AbidesGymMarketsEnv):
                 "total_volume": total_volume,
                 "bid_volume": bid_volume,
                 "ask_volume": ask_volume,
+                "stop_hold_values": self.stop_hold_values,
+                "stop_short_values": self.stop_short_values,
+                "first_interval": self.first_interval,
+                "stabalise2_values": self.stabalise2_values,
             }
         else:
             return {}

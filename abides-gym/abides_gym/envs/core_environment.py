@@ -57,6 +57,7 @@ class AbidesGymCoreEnv(gym.Env, ABC):
 
         # get seed to initialize random states for ABIDES
         seed = self.np_random.randint(low=0, high=2 ** 32, dtype="uint64")
+        print('SEED', seed)
         # instanciate back ground config state
         background_config_args = self.background_config_pair[1]
 
@@ -106,6 +107,19 @@ class AbidesGymCoreEnv(gym.Env, ABC):
         state = self.raw_state_to_state(deepcopy(raw_state["result"]))
         # attach kernel
         self.kernel = kernel
+        self.oracle = self.kernel.oracle
+
+        self.highest_price = None
+        self.lowest_price = None
+        self.stop_hold_values = []
+        self.stop_short_values = []
+        self.stabalise2_values = []
+        self.stop_hold_price = None
+        self.stop_short_price = None
+        self.not_passive = False
+        self.order_time = None
+
+
         return state
 
     def step(self, action: int) -> Tuple[np.ndarray, float, bool, Dict[str, Any]]:
@@ -141,6 +155,18 @@ class AbidesGymCoreEnv(gym.Env, ABC):
                  However, official evaluations of your agent are not allowed to
                  use this for learning.
         """
+
+        # if self.continuous_mode and self.stabalise_mode:
+        #     if not self.action_space.contains(action):
+        #         print('ACTION CHANGED')
+        #         action = np.array([0])
+        print('action', action)
+
+        if self.continuous_mode:
+            if (action[0] < -1) or (action[0] > 1):
+                print('ACTION CLIPPED', action)
+                action = np.clip(action, self.action_space.low, self.action_space.high)
+
         assert self.action_space.contains(
             action
         ), f"Action {action} is not contained in Action Space"
