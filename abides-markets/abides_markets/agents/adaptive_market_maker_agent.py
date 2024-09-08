@@ -125,6 +125,16 @@ class AdaptiveMarketMakerAgent(TradingAgent):
         self.delta_c: float = delta_c  # proportion of orders to cancel at each wakeup or market event
 
         self.circuit_breaker: bool = False
+        self.price_lim = 10_000
+
+        # class OrderSizeModel:
+        #     def __init__(self) -> None:
+        #         pass
+
+        #     def sample(self, random_state: np.random.RandomState) -> float:
+        #         return random_state.randint(20, 50)
+
+        # self.order_size_model = OrderSizeModel()
 
     def initialise_state(self) -> Dict[str, bool]:
         """Returns variables that keep track of whether spread and transacted volume have been observed."""
@@ -368,6 +378,10 @@ class AdaptiveMarketMakerAgent(TradingAgent):
         total_transacted_volume = buy_transacted_volume + sell_transacted_volume
 
         qty = round(self.pov * total_transacted_volume)
+        # print('MM size:', qty)
+
+        # holdings = self.get_holdings(self.symbol)
+        # print('MM holdings', holdings)
 
         if self.skew_beta == 0:  # ignore inventory
             self.buy_order_size = (
@@ -382,12 +396,20 @@ class AdaptiveMarketMakerAgent(TradingAgent):
             sell_size = ceil(proportion_sell * qty)
             buy_size = floor((1 - proportion_sell) * qty)
 
+            # if self.id == 31 or self.id == 32 or self.id == 33:
+            #     print('MM holdings', holdings)
+            # print('MM sell size', sell_size)
+            # print('MM buy size', buy_size)
+
             self.buy_order_size = (
                 buy_size if buy_size >= self.min_order_size else self.min_order_size
             )
             self.sell_order_size = (
                 sell_size if sell_size >= self.min_order_size else self.min_order_size
             )
+
+        # self.buy_order_size = self.order_size_model.sample(random_state=self.random_state)
+        # self.sell_order_size = self.order_size_model.sample(random_state=self.random_state)
 
     def compute_orders_to_place(self, mid: int) -> Tuple[List[int], List[int]]:
         """Given a mid price, computes the orders that need to be removed from
@@ -444,10 +466,19 @@ class AdaptiveMarketMakerAgent(TradingAgent):
 
         if self.circuit_breaker:
             return
+        
+        orders = []
+
+        # holdings = self.get_holdings(self.symbol)
+        # if holdings > self.price_lim:
+        #     self.place_market_order(self.symbol, quantity=self.sell_order_size, side=Side.ASK)
+        #     #print('MM UPPER LIMIT TRIGGERED')
+        # elif holdings < -self.price_lim:
+        #     self.place_market_order(self.symbol, quantity=self.buy_order_size, side=Side.BID)
+        #     #print('MM LOWER LIMIT TRIGGERED')
+        # else:
 
         bid_orders, ask_orders = self.compute_orders_to_place(mid)
-
-        orders = []
 
         if self.backstop_quantity != 0:
             bid_price = bid_orders[0]

@@ -19,7 +19,7 @@ from abides_markets.agents import (
     AdaptiveMarketMakerAgent,
     MomentumAgentPrev,
 )
-from abides_markets.models import OrderSizeModel
+from abides_markets.models import OrderSizeModelPrev, OrderSizeModel
 from abides_markets.oracles import SparseMeanRevertingOracle
 from abides_markets.utils import generate_latency_model
 
@@ -101,7 +101,8 @@ def build_config(
     mm_wake_up_freq = str_to_ns(mm_wake_up_freq)
 
     # order size model
-    ORDER_SIZE_MODEL = OrderSizeModel()  # Order size model
+    ORDER_SIZE_MODEL = OrderSizeModel() 
+    #ORDER_SIZE_MODEL = OrderSizeModelPrev()  # Order size model
     # market marker derived parameters
     MM_PARAMS = [
         (mm_window_size, mm_pov, mm_num_ticks, mm_wake_up_freq, mm_min_order_size),

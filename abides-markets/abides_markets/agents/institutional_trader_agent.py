@@ -128,6 +128,7 @@ class InstitutionalTraderAgent(TradingAgent):
         super().wakeup(current_time)
 
         self.state = "INACTIVE"
+        print('WAG1')
 
         if not self.mkt_open or not self.mkt_close:
             # TradingAgent handles discovery of exchange times.
@@ -173,7 +174,7 @@ class InstitutionalTraderAgent(TradingAgent):
         #     return
         if self.circuit_breaker:
             return
-        
+    
         if current_time >= self.trigger_time and self.symbol in self.holdings and self.holdings[self.symbol] > 0:
         
             # if not self.sell_amount:
@@ -193,7 +194,8 @@ class InstitutionalTraderAgent(TradingAgent):
 
             # sell order size is dependent on recent transacted volume
             order_size = min(self.holdings[self.symbol], int(total_transacted_volume * self.sell_volume_factor * self.inventory))
-            print(order_size)
+            print('TRIGGER')
+            print('IT Order Size:',order_size)
 
             # place market sell order
             if order_size > 0:

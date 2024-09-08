@@ -587,7 +587,6 @@ class TradingAgent(FinancialAgent):
                 the order.
             tag:
         """
-
         order = MarketOrder(
             self.id, self.current_time, symbol, quantity, side, order_id, tag
         )

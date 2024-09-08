@@ -281,6 +281,6 @@ class SparseMeanRevertingOracle(MeanRevertingOracle):
             "Oracle: current fundamental value is {} at {}".format(r_t, current_time)
         )
         logger.debug("Oracle: giving client value observation {}".format(obs))
-
+        #print("Oracle: current fundamental value is {} at {}".format(r_t, current_time))
         # Reminder: all simulator prices are specified in integer cents.
         return obs

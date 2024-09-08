@@ -192,7 +192,6 @@ class OrderBook:
             quiet: If True messages will not be sent to agents and entries will not be added to
                 history. Used when this function is a part of a more complex order.
         """
-
         if order.symbol != self.symbol:
             warnings.warn(
                 f"{order.symbol} order discarded. Does not match OrderBook symbol: {self.symbol}"

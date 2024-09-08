@@ -1,4 +1,9 @@
-# Flash Crash configuration:
+# RMSC-4 (Reference Market Simulation Configuration):
+# - 1     Exchange Agent
+# - 2     Adaptive Market Maker Agents
+# - 102   Value Agents
+# - 12    Momentum Agents
+# - 1000  Noise Agents
 
 import os
 from datetime import datetime
@@ -9,16 +14,19 @@ import pandas as pd
 from abides_core.utils import get_wake_time, str_to_ns
 from abides_markets.agents import (
     ExchangeAgent,
-    NoiseAgent,
-    ValueAgent,
+    NoiseAgentPrev,
+    ValueAgentPrev,
     AdaptiveMarketMakerAgent,
-    MomentumAgent,
-    InstitutionalTraderAgent,
+    MomentumAgentPrev,
+    InstitutionalTraderAgent
 )
 from abides_markets.models import OrderSizeModel, LimitPriceModel
-from abides_markets.oracles import FlashCrashOracle, GeometricBrownianMotionOracle, MeanRevertingOracle, SparseMeanRevertingOracle
+from abides_markets.oracles import SparseMeanRevertingOracle
 from abides_markets.utils import generate_latency_model
-from abides_markets.configs.agent_params import ExchangeConfig, NoiseAgentConfig, ValueAgentConfig, MarketMakerAgentConfig, MomentumAgentConfig, FlashCrashOracleConfig, InstitutionalTraderAgentConfig, GBMOracleConfig
+
+
+########################################################################################################################
+############################################### GENERAL CONFIG #########################################################
 
 
 def build_config(
@@ -28,29 +36,42 @@ def build_config(
     stdout_log_level="INFO",
     ticker="ABM",
     starting_cash=1_000_000,  # Cash in this simulator is always in CENTS.
-    trader_log_orders=False,  # if True log messages in the traders
-    log_dir=None,
+    log_orders=True,  # if True log everything
     # 1) Exchange Agent
-    exchange_params=ExchangeConfig(),
+    book_logging=True,
+    book_log_depth=10,
+    stream_history_length=500,
+    exchange_log_orders=None,
     # 2) Noise Agent
-    num_noise_agents=1000,
-    noise_agent_params=NoiseAgentConfig(),
+    num_noise_agents=997,
     # 3) Value Agents
-    num_value_agents=102,
-    value_agent_params=ValueAgentConfig(),
+    num_value_agents=10,
+    r_bar=10_000,  # true mean fundamental value
+    kappa=1.67e-15,  # Value Agents appraisal of mean-reversion
+    lambda_a=5.7e-12,  # ValueAgent arrival rate
     # oracle
-    # oracle_params=FlashCrashOracleConfig(),
-    oracle_params=GBMOracleConfig(),
+    kappa_oracle=1.67e-16,  # Mean-reversion of fundamental time series.
+    sigma_s=0,
+    fund_vol=5e-5,  # Volatility of fundamental time series (std).
+    megashock_lambda_a=2.77778e-18,
+    megashock_mean=1000,
+    megashock_var=50_000,
     # 4) Market Maker Agents
-    num_mm_agents=15,
-    mm_agent_params=MarketMakerAgentConfig(),
-    # 5) Long Momentum Agents
-    num_long_momentum_agents=6,
-    momentum_agent_params=MomentumAgentConfig(),
-    # 6) Institutional Trader Agent
-    institutional_params=InstitutionalTraderAgentConfig(),
-    # 7) Short Momentum Agents
-    num_short_momentum_agents=6,
+    # each elem of mm_params is tuple (window_size, pov, num_ticks, wake_up_freq, min_order_size)
+    mm_window_size="adaptive",
+    mm_pov=0.025,
+    mm_num_ticks=10,
+    mm_wake_up_freq="1S",
+    mm_min_order_size=1,
+    mm_skew_beta=0,
+    mm_price_skew=4,
+    mm_level_spacing=5,
+    mm_spread_alpha=0.75,
+    mm_backstop_quantity=0,
+    mm_cancel_limit_delay=50,  # 50 nanoseconds
+    num_market_maker_agents = 19,
+    # 5) Momentum Agents
+    num_momentum_agents=10,
 ):
     """
     create the background configuration for rmsc04
@@ -61,42 +82,62 @@ def build_config(
     :return: all agents of the config
     :rtype: list
     """
-    r_bar = 100_000
+
     # fix seed
     np.random.seed(seed)
 
+    def path_wrapper(pomegranate_model_json):
+        """
+        temporary solution to manage calls from abides-gym or from the rest of the code base
+        TODO:find more general solution
+        :return:
+        :rtype:
+        """
+        # get the  path of the file
+        path = os.getcwd()
+        if path.split("/")[-1] == "abides_gym":
+            return "../" + pomegranate_model_json
+        else:
+            return pomegranate_model_json
+
+    mm_wake_up_freq = str_to_ns(mm_wake_up_freq)
+
     # order size model
     ORDER_SIZE_MODEL = OrderSizeModel()  # Order size model
-    # limit order price model
     LIMIT_PRICE_MODEL = LimitPriceModel()
+    # market marker derived parameters
+    MM_PARAMS = [(mm_window_size, mm_pov, mm_num_ticks, mm_wake_up_freq, mm_min_order_size) for i in range(num_market_maker_agents)]
+    NUM_MM = len(MM_PARAMS)
+    # noise derived parameters
+    SIGMA_N = r_bar / 100  # observation noise variance
 
     # date&time
     DATE = int(pd.to_datetime(date).to_datetime64())
     MKT_OPEN = DATE + str_to_ns("09:30:00")
     MKT_CLOSE = DATE + str_to_ns(end_time)
+    # These times needed for distribution of arrival times of Noise Agents
+    # NOISE_MKT_OPEN = MKT_OPEN - str_to_ns("00:30:00")
+    # NOISE_MKT_CLOSE = DATE + str_to_ns("16:00:00")
+    NOISE_MKT_OPEN = MKT_OPEN
+    NOISE_MKT_CLOSE = DATE + str_to_ns(end_time)
 
     # oracle
-    # oracle = FlashCrashOracle(ticker, MKT_OPEN, S0=r_bar, mu=oracle_params.mu, sigma=oracle_params.sigma)
-    # oracle = GeometricBrownianMotionOracle(ticker, MKT_OPEN, S0=r_bar, mu=oracle_params.mu, sigma=oracle_params.sigma)
-    # symbols = {ticker: {"r_bar": 10_000,
-    # "kappa": 1.67e-16,
-    # "sigma_s": 0,}}
     symbols = {
         ticker: {
-            "r_bar": 10_000,
-            "kappa": 1.67e-16,
-            "sigma_s": 0,
-            "fund_vol": 6e-4,
-            "megashock_lambda_a": 2.77778e-18,
-            "megashock_mean": 10,
-            "megashock_var": 500,
+            "r_bar": r_bar,
+            "kappa": kappa_oracle,
+            "sigma_s": sigma_s,
+            "fund_vol": fund_vol,
+            "megashock_lambda_a": megashock_lambda_a,
+            "megashock_mean": megashock_mean,
+            "megashock_var": megashock_var,
             "random_state": np.random.RandomState(
-                seed=np.random.randint(low=0, high=2**32, dtype="uint64")
+                seed=np.random.randint(low=0, high=2**31)
             ),
         }
     }
-    # oracle = MeanRevertingOracle(MKT_OPEN, MKT_CLOSE, symbols)
-    oracle = SparseMeanRevertingOracle(MKT_OPEN, MKT_CLOSE, symbols)
+
+    oracle = SparseMeanRevertingOracle(MKT_OPEN, NOISE_MKT_CLOSE, symbols)
 
     # Agent configuration
     agent_count, agents, agent_types = 0, [], []
@@ -105,202 +146,147 @@ def build_config(
         [
             ExchangeAgent(
                 id=0,
+                name="EXCHANGE_AGENT",
+                type="ExchangeAgent",
                 mkt_open=MKT_OPEN,
                 mkt_close=MKT_CLOSE,
                 symbols=[ticker],
-                name="ExchangeAgent",
-                type="ExchangeAgent",
+                book_logging=book_logging,
+                book_log_depth=book_log_depth,
+                log_orders=exchange_log_orders,
+                pipeline_delay=0,
+                computation_delay=0,
+                stream_history=stream_history_length,
                 random_state=np.random.RandomState(
-                    seed=np.random.randint(low=0, high=2**32, dtype="uint64")),
-                book_logging=exchange_params.book_logging,
-                book_log_depth=exchange_params.book_log_depth,
-                log_orders=exchange_params.log_orders,
-                pipeline_delay=exchange_params.pipeline_delay,
-                computation_delay=exchange_params.computation_delay,
-                stream_history=exchange_params.stream_history,
-                use_metric_tracker=exchange_params.use_metric_tracker,
+                    seed=np.random.randint(low=0, high=2**32, dtype="uint64")
+                ),
             )
         ]
     )
-    agent_types.extend(["ExchangeAgent"])
+    agent_types.extend("ExchangeAgent")
     agent_count += 1
 
     agents.extend(
         [
-            InstitutionalTraderAgent(
-                id=1,
-                trigger_time=DATE + str_to_ns("09:30:02"),
-                symbol=ticker,
-                starting_cash=starting_cash,
-                name="InstitutionalTraderAgent",
-                type="InstitutionalTraderAgent",
-                order_size_model=ORDER_SIZE_MODEL,
-                limit_price_model=LIMIT_PRICE_MODEL,
-                random_state=np.random.RandomState(
-                    seed=np.random.randint(low=0, high=2**32, dtype="uint64")),
-                inventory=institutional_params.inventory,
-                sell_frequency=institutional_params.sell_frequency,
-                sell_volume_factor=institutional_params.sell_volume_factor,
-            )
-        ]
-    )
-    agent_types.extend(["InstitutionalTraderAgent"])
-    agent_count += 1
-
-    agents.extend(
-        [
-            NoiseAgent(
+            NoiseAgentPrev(
                 id=j,
+                name="NoiseAgent {}".format(j),
+                type="NoiseAgent",
                 symbol=ticker,
                 starting_cash=starting_cash,
-                name="NoiseAgent_{}".format(j),
-                type="NoiseAgent",
+                wakeup_time=get_wake_time(NOISE_MKT_OPEN, NOISE_MKT_CLOSE),
+                log_orders=log_orders,
                 order_size_model=ORDER_SIZE_MODEL,
-                limit_price_model=LIMIT_PRICE_MODEL,
                 random_state=np.random.RandomState(
-                    seed=np.random.randint(low=0, high=2**32, dtype="uint64")),
-                sigma_limit=noise_agent_params.sigma_limit,
-                sigma_mkt=noise_agent_params.sigma_mkt,
-                delta_c=noise_agent_params.delta_c,
-                mean_wakeup_gap=noise_agent_params.mean_wakeup_gap,
-                log_orders=trader_log_orders,
+                    seed=np.random.randint(low=0, high=2**32, dtype="uint64")
+                ),
             )
             for j in range(agent_count, agent_count + num_noise_agents)
         ]
     )
     agent_count += num_noise_agents
-    agent_types.extend(["NoiseAgent"] * num_noise_agents)
-    print('Noise Agents: ', num_noise_agents)
-
-    print(value_agent_params)
-    print(type(value_agent_params))
-    print(value_agent_params.r_bar)
+    agent_types.extend(["NoiseAgent"])
 
     agents.extend(
         [
-            ValueAgent(
+            ValueAgentPrev(
                 id=j,
+                name="Value Agent {}".format(j),
+                type="ValueAgent",
                 symbol=ticker,
                 starting_cash=starting_cash,
-                name="ValueAgent_{}".format(j),
-                type="ValueAgent",
+                sigma_n=SIGMA_N,
+                r_bar=r_bar,
+                kappa=kappa,
+                lambda_a=lambda_a,
+                log_orders=log_orders,
                 order_size_model=ORDER_SIZE_MODEL,
-                limit_price_model=LIMIT_PRICE_MODEL,
                 random_state=np.random.RandomState(
-                    seed=np.random.randint(low=0, high=2**32, dtype="uint64")),
-                r_bar=value_agent_params.r_bar,
-                mean_wakeup_gap=value_agent_params.mean_wakeup_gap,
-                log_orders=trader_log_orders,
+                    seed=np.random.randint(low=0, high=2**32, dtype="uint64")
+                ),
             )
             for j in range(agent_count, agent_count + num_value_agents)
         ]
     )
     agent_count += num_value_agents
-    agent_types.extend(["ValueAgent"] * num_value_agents)
-    print('Value Agents: ', num_value_agents)
+    agent_types.extend(["ValueAgent"])
 
-    # market marker derived parameters
     agents.extend(
         [
             AdaptiveMarketMakerAgent(
                 id=j,
-                symbol=ticker,
-                starting_cash=starting_cash * 10,
-                name="AdaptiveMarketMaker_{}".format(j),
+                name="ADAPTIVE_POV_MARKET_MAKER_AGENT_{}".format(j),
                 type="AdaptivePOVMarketMakerAgent",
+                symbol=ticker,
+                starting_cash=starting_cash,
+                pov=MM_PARAMS[idx][1],
+                min_order_size=MM_PARAMS[idx][4],
+                window_size=MM_PARAMS[idx][0],
+                num_ticks=MM_PARAMS[idx][2],
+                wake_up_freq=MM_PARAMS[idx][3],
+                poisson_arrival=True,
+                cancel_limit_delay=mm_cancel_limit_delay,
+                skew_beta=mm_skew_beta,
+                price_skew_param=mm_price_skew,
+                level_spacing=mm_level_spacing,
+                spread_alpha=mm_spread_alpha,
+                backstop_quantity=mm_backstop_quantity,
+                log_orders=log_orders,
                 random_state=np.random.RandomState(
                     seed=np.random.randint(low=0, high=2**32, dtype="uint64")
                 ),
-                log_orders=trader_log_orders,
-                anchor=mm_agent_params.anchor,
-                window_size=mm_agent_params.window_size,
-                pov=mm_agent_params.pov,
-                num_ticks=mm_agent_params.num_ticks,
-                wake_up_freq=mm_agent_params.wake_up_freq,
-                min_order_size=mm_agent_params.min_order_size,
-                level_spacing=mm_agent_params.level_spacing,
-                cancel_limit_delay=mm_agent_params.cancel_limit_delay,
-                skew_beta=mm_agent_params.skew_beta,
-                price_skew_param=mm_agent_params.price_skew_param,
-                spread_alpha=mm_agent_params.spread_alpha,
-                backstop_quantity=mm_agent_params.backstop_quantity,
-                min_imbalance=mm_agent_params.min_imbalance,
-                delta_c=mm_agent_params.delta_c,
-                poisson_arrival=mm_agent_params.poisson_arrival,
-                subscribe=mm_agent_params.subscribe,
-                subscribe_freq=mm_agent_params.subscribe_freq,
-                subscribe_num_levels=mm_agent_params.subscribe_num_levels,
             )
-            for idx, j in enumerate(range(agent_count, agent_count + num_mm_agents))
+            for idx, j in enumerate(range(agent_count, agent_count + NUM_MM))
         ]
     )
-    agent_count += num_mm_agents
-    agent_types.extend(["POVMarketMakerAgent"] * num_mm_agents)
-    print('Market Maker Agents: ', num_mm_agents)
+    agent_count += NUM_MM
+    agent_types.extend("POVMarketMakerAgent")
 
     agents.extend(
         [
-            MomentumAgent(
+            MomentumAgentPrev(
                 id=j,
-                name="LongMomentumAgent_{}".format(j),
+                name="MOMENTUM_AGENT_{}".format(j),
                 type="MomentumAgent",
                 symbol=ticker,
                 starting_cash=starting_cash,
+                min_size=1,
+                max_size=10,
+                wake_up_freq=str_to_ns("37s"),
+                poisson_arrival=True,
+                log_orders=log_orders,
                 order_size_model=ORDER_SIZE_MODEL,
-                limit_price_model=LIMIT_PRICE_MODEL,
                 random_state=np.random.RandomState(
-                    seed=np.random.randint(low=0, high=2**32, dtype="uint64")),
-                min_size=momentum_agent_params.min_size,
-                max_size=momentum_agent_params.max_size,
-                alpha=0.05,
-                gamma=momentum_agent_params.gamma,
-                beta_limit=momentum_agent_params.beta_limit,
-                beta_mkt=momentum_agent_params.beta_mkt,
-                delta_c=momentum_agent_params.delta_c,
-                wake_up_freq=momentum_agent_params.wake_up_freq,
-                data_freq=momentum_agent_params.data_freq,
-                poisson_arrival=momentum_agent_params.poisson_arrival,
-                subscribe=momentum_agent_params.subscribe,
-                log_orders=trader_log_orders,
+                    seed=np.random.randint(low=0, high=2**32, dtype="uint64")
+                ),
             )
-            for j in range(agent_count, agent_count + num_long_momentum_agents)
+            for j in range(agent_count, agent_count + num_momentum_agents)
         ]
     )
-    agent_count += num_long_momentum_agents
-    agent_types.extend(["MomentumAgent"] * num_long_momentum_agents)
-    print('Long Momentum Agents: ', num_long_momentum_agents)
+    agent_count += num_momentum_agents
+    agent_types.extend("MomentumAgent")
 
-    agents.extend(
-        [
-            MomentumAgent(
-                id=j,
-                name="ShortMomentumAgent_{}".format(j),
-                type="MomentumAgent",
-                symbol=ticker,
-                starting_cash=starting_cash,
-                order_size_model=ORDER_SIZE_MODEL,
-                limit_price_model=LIMIT_PRICE_MODEL,
-                random_state=np.random.RandomState(
-                    seed=np.random.randint(low=0, high=2**32, dtype="uint64")),
-                min_size=momentum_agent_params.min_size,
-                max_size=momentum_agent_params.max_size,
-                alpha=0.9,
-                gamma=momentum_agent_params.gamma,
-                beta_limit=momentum_agent_params.beta_limit,
-                beta_mkt=momentum_agent_params.beta_mkt,
-                delta_c=momentum_agent_params.delta_c,
-                wake_up_freq=momentum_agent_params.wake_up_freq,
-                data_freq=momentum_agent_params.data_freq,
-                poisson_arrival=momentum_agent_params.poisson_arrival,
-                subscribe=momentum_agent_params.subscribe,
-                log_orders=trader_log_orders,
-            )
-            for j in range(agent_count, agent_count + num_short_momentum_agents)
-        ]
-    )
-    agent_count += num_short_momentum_agents
-    agent_types.extend(["MomentumAgent"] * num_short_momentum_agents)
-    print('Short Momentum Agents: ', num_short_momentum_agents)
+    # agents.extend(
+    #     [
+    #         InstitutionalTraderAgent(
+    #             id=agent_count,
+    #             trigger_time=DATE + str_to_ns("09:31:00"),
+    #             symbol=ticker,
+    #             starting_cash=starting_cash,
+    #             name="InstitutionalTraderAgent",
+    #             type="InstitutionalTraderAgent",
+    #             order_size_model=ORDER_SIZE_MODEL,
+    #             limit_price_model=LIMIT_PRICE_MODEL,
+    #             random_state=np.random.RandomState(
+    #                 seed=np.random.randint(low=0, high=2**32, dtype="uint64")),
+    #             inventory=1e13,
+    #             sell_frequency="00:00:02",
+    #             sell_volume_factor=1000,
+    #         )
+    #     ]
+    # )
+    # agent_types.extend(["InstitutionalTraderAgent"])
+    # agent_count += 1
 
     # extract kernel seed here to reproduce the state of random generator in old version
     random_state_kernel = np.random.RandomState(
@@ -314,17 +300,15 @@ def build_config(
     ##kernel args
     kernelStartTime = DATE
     kernelStopTime = MKT_CLOSE + str_to_ns("1s")
-    
+
     return {
         "seed": seed,
         "start_time": kernelStartTime,
         "stop_time": kernelStopTime,
         "agents": agents,
-        "agent_types": agent_types,
         "agent_latency_model": latency_model,
         "default_computation_delay": default_computation_delay,
         "custom_properties": {"oracle": oracle},
         "random_state_kernel": random_state_kernel,
         "stdout_log_level": stdout_log_level,
-        "log_dir": log_dir,
     }

@@ -27,7 +27,7 @@ def build_config(
     end_time="10:00:00",
     stdout_log_level="INFO",
     ticker="ABM",
-    starting_cash=1_000_000,  # Cash in this simulator is always in CENTS.
+    starting_cash=1000_000,  # Cash in this simulator is always in CENTS.
     trader_log_orders=False,  # if True log messages in the traders
     log_dir=None,
     # 1) Exchange Agent
@@ -129,7 +129,7 @@ def build_config(
         [
             InstitutionalTraderAgent(
                 id=1,
-                trigger_time=DATE + str_to_ns("09:30:02"),
+                trigger_time=DATE + str_to_ns(institutional_params.trigger_time),
                 symbol=ticker,
                 starting_cash=starting_cash,
                 name="InstitutionalTraderAgent",
@@ -171,10 +171,6 @@ def build_config(
     agent_count += num_noise_agents
     agent_types.extend(["NoiseAgent"] * num_noise_agents)
     print('Noise Agents: ', num_noise_agents)
-
-    print(value_agent_params)
-    print(type(value_agent_params))
-    print(value_agent_params.r_bar)
 
     agents.extend(
         [

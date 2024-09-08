@@ -5,7 +5,6 @@ config_extra:
   timesteps_per_iteration: 1000
   observation_filter: "MeanStdFilter"
   num_workers: 5
-  gamma: 1
 
 #Flash Crash env config
 # env_config:
@@ -15,8 +14,9 @@ config_extra:
 #   mkt_close: "09:40:00"
 #   first_interval: "00:00:01"
 #   done_ratio: "-inf"
-#   order_fixed_size: 300
-#   stabalise_mode: False
+#   order_fixed_size: 1000
+#   continuous_mode: True
+#   stabalise_mode: True
 
 # env_config:
 #   background_config: "rmsc06"
@@ -25,12 +25,14 @@ config_extra:
 #   mkt_close: "09:45:00"
 #   first_interval: "00:00:01"
 #   done_ratio: "-inf"
-#   order_fixed_size: 300
+#   order_fixed_size: 100
 #   stabalise_mode: False
 
 #Ordinary config
 env_config:
-  order_fixed_size: 100
+  order_fixed_size: 1000
+  stabalise_mode: True
+  # continuous_mode: True
   #timestep_duration: 1e5
 
 run_settings:

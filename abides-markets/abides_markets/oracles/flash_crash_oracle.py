@@ -57,5 +57,6 @@ class FlashCrashOracle(Oracle):
         # Append the change to the permanent log of fundamental values for this symbol.
         self.f_log[symbol].append({"FundamentalTime": current_time, "FundamentalValue": self.last_price})
         logger.debug("Oracle: observed price {} at time {}", self.last_price, current_time)
+        print("Oracle: observed price {} at time {}", self.last_price, current_time)
         # print("Oracle: observed price {} at time {}".format(self.last_price, current_time))
         return int(self.last_price)

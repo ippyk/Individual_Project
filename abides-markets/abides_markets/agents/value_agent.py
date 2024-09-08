@@ -6,12 +6,23 @@ import numpy as np
 
 from abides_core import Message, NanosecondTime
 
-from ..messages.query import QuerySpreadResponseMsg
+from ..messages.query import QuerySpreadResponseMsg, QueryTransactedVolResponseMsg
 from ..messages.circuit_breaker import CircuitBreakerStart, CircuitBreakerEnd
 from ..orders import Side, LimitOrder
 from ..models.limit_price_model import LimitPriceModel
 from .trading_agent import TradingAgent
+from abides_core.utils import str_to_ns
+from ..messages.marketdata import (
+    # MarketDataMsg,
+    # L2DataMsg,
+    # L2SubReqMsg,
+    # BookImbalanceDataMsg,
+    # BookImbalanceSubReqMsg,
+    # MarketDataEventMsg,
+    TransactedVolSubReqMsg,
+    TransactedVolDataMsg,
 
+)
 
 logger = logging.getLogger(__name__)
 
@@ -66,6 +77,13 @@ class ValueAgent(TradingAgent):
 
         self.circuit_breaker: bool = False
 
+        self.pov = 0.025
+
+        self.subscribe = False
+        self.subscription_requested = False
+        self.subscribe_freq='1S'
+        self.subscribe_num_levels=1
+
     def kernel_starting(self, start_time: NanosecondTime) -> None:
         # self.kernel is set in Agent.kernel_initializing()
         # self.exchange_id is set in TradingAgent.kernel_starting()
@@ -112,6 +130,15 @@ class ValueAgent(TradingAgent):
         # Parent class handles discovery of exchange times and market_open wakeup call.
         super().wakeup(current_time)
 
+        obs_t = self.oracle.observe_price(
+            self.symbol,
+            self.current_time,
+            random_state=self.random_state,
+        )
+
+        if self.id == 118:
+            holdings = self.get_holdings(self.symbol)
+            print('value agent', holdings)
         if not self.mkt_open or not self.mkt_close:
             # TradingAgent handles discovery of exchange times.
             return
@@ -130,12 +157,23 @@ class ValueAgent(TradingAgent):
             return
 
         delta_time = self.random_state.exponential(scale=self.mean_wakeup_gap)
+        # if self.id == 18:
+        #     print('delta time', delta_time)
         self.set_wakeup(current_time + int(round(delta_time)))
 
         # If we get here, we are in the middle of the trading day and we need to
         self.cancel_all_orders()
         self.get_current_spread(self.symbol)
         self.state = "AWAITING_SPREAD"
+
+        if not self.subscription_requested:
+            self.state2 = self.initialise_state()
+            super().request_data_subscription(
+                TransactedVolSubReqMsg(symbol=self.symbol, 
+                                        freq=str_to_ns(self.subscribe_freq),
+                                        lookback=self.subscribe_freq,))
+            self.subscription_requested = True
+        self.get_transacted_volume(self.symbol, lookback_period='1S')
 
     def updateEstimates(self) -> int:
         # Called by a background agent that wishes to obtain a new fundamental observation,
@@ -167,8 +205,13 @@ class ValueAgent(TradingAgent):
 
         bid, bid_vol, ask, ask_vol = self.get_known_bid_ask(self.symbol)
 
+        # if self.id == 18:
+        #     print('fundamental value:', r_T)
+
         if bid and ask:
             mid = int((ask + bid) / 2)
+            # if self.id == 18:
+            #     print('mid:', mid)
 
             if r_T < mid:
                 # fundamental belief that price will go down, place a sell order
@@ -190,6 +233,33 @@ class ValueAgent(TradingAgent):
         # Place the order
         if self.order_size_model is not None:
             self.size = self.order_size_model.sample(random_state=self.random_state)
+        
+        # if self.transacted_volume:
+        #     buy_transacted_volume = self.transacted_volume[self.symbol][0]
+        #     sell_transacted_volume = self.transacted_volume[self.symbol][1]
+        #     total_transacted_volume = buy_transacted_volume + sell_transacted_volume
+        #     self.size = round(self.pov * total_transacted_volume)
+            # print('VALUE AGENT SIZE', self.size)
+
+        #     if self.id == 18:
+        #         print('transacted volume', self.transacted_volume)
+        #         print('size', self.size)
+
+        # if self.id == 18:
+        #     if side == Side.BID:
+        #         print('BID', self.size)
+        #     else:
+        #         print('ASK', self.size)
+        #     if bid and ask:
+        #             print('difference:', mid-r_T)
+
+        # if not self.size > 0:
+        #     self.size = self.order_size_model.sample(random_state=self.random_state)
+        # prc_ = self.limit_price_model.sample(ref_prc, side, random_state=self.random_state)
+        # self.place_limit_order(self.symbol, self.size, side, ref_prc)
+        # if self.random_state.rand() < self.kappa_mkt:
+        #         self.place_market_order(self.symbol, quantity=self.size, side=side)
+
 
         if self.size > 0:
             if distortion is None: # When there is no bid and ask in the beginning. Submit order to initial the market
@@ -219,6 +289,22 @@ class ValueAgent(TradingAgent):
         # If our internal state indicates we were waiting for a particular event,
         # check if we can transition to a new state.
 
+        # if not self.subscribe:
+        # if (isinstance(message, QueryTransactedVolResponseMsg) 
+        #     and self.state["AWAITING_TRANSACTED_VOLUME"] is True
+        # ):
+        #     self.update_order_size()
+        #     self.state["AWAITING_TRANSACTED_VOLUME"] = False
+        # else:
+        # print(self.state)
+        if (isinstance(message, TransactedVolDataMsg)
+            and self.state2["AWAITING_TRANSACTED_VOLUME"] is True
+        ):
+            # print("debug: Received transacted volume", message.bid_volume, message.ask_volume)
+            # print('TRANSACTED MESSAGE RECIEVED')
+            #self.update_order_size()
+            self.state2["AWAITING_TRANSACTED_VOLUME"] = False
+
         if isinstance(message, CircuitBreakerStart):
             self.circuit_breaker = True
         elif isinstance(message, CircuitBreakerEnd):
@@ -247,3 +333,11 @@ class ValueAgent(TradingAgent):
     def get_wake_frequency(self) -> NanosecondTime:
         delta_time = self.random_state.exponential(scale=self.mean_wakeup_gap)
         return int(round(delta_time))
+
+    def initialise_state(self):
+        """Returns variables that keep track of whether spread and transacted volume have been observed."""
+
+        if self.subscribe:
+            return {"AWAITING_MARKET_DATA": True, "AWAITING_TRANSACTED_VOLUME": True}
+        else:
+            return {"AWAITING_SPREAD": True, "AWAITING_TRANSACTED_VOLUME": True}

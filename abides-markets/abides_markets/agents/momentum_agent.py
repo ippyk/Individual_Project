@@ -164,9 +164,11 @@ class MomentumAgent(TradingAgent):
         prc_ = self.limit_price_model.sample(ref_prc, s_, random_state=self.random_state)
         if self.size > 0:
             if self.random_state.rand() < self.get_limit_prob():
+                # print('MOMENTUM LIMIT ORDER')
                 self.place_limit_order(self.symbol, quantity=self.size, side=s_, limit_price=prc_)
             
             if self.random_state.rand() < self.get_mkt_prob():
+                # print('MOMENTUM MARKET ORDER')
                 self.place_market_order(self.symbol, quantity=self.size, side=s_)
 
     def cancelOrder_workflow(self) -> None:
