@@ -549,40 +549,7 @@ class SubGymMarketsDailyInvestorEnv_v0(AbidesGymMarketsEnv):
                 reward = -np.abs(last_transaction-np.mean(self.reward_deque))
             self.reward_deque.append(last_transaction)
 
-            #print(-reward)
             return reward
-
-            # if not self.diffs:
-            #     return_std = 0
-            # else:
-            #     return_std = np.std(self.diffs)
-
-            # holdings = raw_state["internal_data"]["holdings"]
-            # cash = raw_state["internal_data"]["cash"]
-            # last_transaction = raw_state["parsed_mkt_data"]["last_transaction"]
-
-            # if not self.reward_deque:
-            #     F = 0
-            # else:
-            #     F = 1 / (np.abs(last_transaction-np.mean(self.reward_deque)) + 0.1)
-
-            # if len(self.reward_deque) > 1 and (self.reward_deque[-2] - self.reward_deque[-1] > return_std):
-            #     Q = (self.reward_deque[-2] - self.reward_deque[-1])
-            #     reward = F*Q
-            # else:
-            #     if self.holdings and self.cash:
-            #         reward = -np.abs(holdings-self.holdings[0])-np.abs(cash-self.cash[0])
-            #     else:
-            #         reward = 0
-
-            # if self.reward_deque:
-            #     self.diffs.append(last_transaction-self.reward_deque[-1])
-
-            # self.reward_deque.append(last_transaction)
-            # self.holdings.append(holdings)
-            # self.cash.append(cash)
-
-            # return reward
 
 
     @raw_state_pre_process
@@ -687,8 +654,6 @@ class SubGymMarketsDailyInvestorEnv_v0(AbidesGymMarketsEnv):
 
         # 6) Holdings
         holdings = raw_state["internal_data"]["holdings"]
-        #print('yo', holdings)
-        #self.holdings = holdings
 
         # 7) Spread
         spread = best_ask - best_bid
@@ -707,20 +672,8 @@ class SubGymMarketsDailyInvestorEnv_v0(AbidesGymMarketsEnv):
                 orderbook[book_name]["price"][level] = np.array([price]).reshape(-1)
                 orderbook[book_name]["volume"][level] = np.array([volume]).reshape(-1)
 
-        # print('oderbook', orderbook)
-        # print('bids', bids)
-        # print('asks', asks)
-
         # 9) order_status
         order_status = raw_state["internal_data"]["order_status"]
-
-        # if isinstance(order_status, list):
-        #     print(order_status[-1])
-        # else:
-        #     print(order_status)
-        # print(order_status)
-        # key = max(order_status.keys())
-        # print('executed_qty', order_status[key])
 
         # 10) mkt_open
         mkt_open = raw_state["internal_data"]["mkt_open"]
