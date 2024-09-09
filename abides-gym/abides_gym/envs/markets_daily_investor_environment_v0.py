@@ -232,33 +232,17 @@ class SubGymMarketsDailyInvestorEnv_v0(AbidesGymMarketsEnv):
         # instantiate previous_marked_to_market as starting_cash
         self.previous_marked_to_market = self.starting_cash
 
-        class LimitPriceModel:
-            def __init__(self, random_state, scale: float = 2.) -> None:
-                self.scale = scale
-                self.random_state = random_state
-
-            def sample(self, ref_prc: float, order_type) -> int:
-                if order_type == "BUY":
-                    return round(ref_prc - np.ceil(self.random_state.exponential(scale=self.scale)))
-                else:
-                    return round(ref_prc + np.ceil(self.random_state.exponential(scale=self.scale)))
-
-        self.limit_price_model = LimitPriceModel(random_state = self.np_random)
-
     def place_order(self, order_type, size):
+        # Function that allows for the submission of limit orders according to a given probability
 
-        print('holdings', self.holdings)
         indicator  = self.np_random.binomial(n=1, p=self.limit_order_prob)
         if indicator:
-
-
             if order_type == "BUY":
                 price = self.best_bid
             else:
                 price = self.best_ask
             print('LIMIT ORDER SUBMITTED')
             return [{"type": "CCL_ALL"},{"type": "LMT", "direction": order_type, "size": size, "limit_price": price}]
-            #return [{"type": "LMT", "direction": order_type, "size": size, "limit_price": price}]
         else:
             return [{"type": "MKT", "direction": order_type, "size": size}]
 
@@ -280,17 +264,9 @@ class SubGymMarketsDailyInvestorEnv_v0(AbidesGymMarketsEnv):
         Returns:
             - action_list: list of the corresponding series of action mapped into abides env apis
         """
-        print('lt', self.last_transaction)
-        # print('hold price', self.stop_hold_price)
-        # print('highest price', self.highest_price)
-        # print('lowest price', self.lowest_price)
-        # print('short price', self.stop_short_price)
-        # print('action, holdings:', self.holdings)
-
-        # print('symbols', self.oracle.symbols)
-        # print('current time', self.current_time)
 
         if self.stabalise_mode2:
+            # Performs the Value Agent Style Override 
 
             obs_t = self.oracle.observe_price(
             'ABM',
@@ -299,9 +275,6 @@ class SubGymMarketsDailyInvestorEnv_v0(AbidesGymMarketsEnv):
                     seed=np.random.randint(low=0, high=2**32, dtype="uint64")
                 ),
             )
-
-            print('fundamental value', obs_t)
-            print('mid price', self.mid_price)
             
             if self.not_passive:
 
@@ -318,7 +291,8 @@ class SubGymMarketsDailyInvestorEnv_v0(AbidesGymMarketsEnv):
                 self.stabalise2_values.append(1)
 
         if self.trailing_stop_mode:
-            print('holdings', self.holdings)
+            # Trailing Stop Loss algorithm
+
             if self.holdings > 0:
 
                 if not self.highest_price:
@@ -381,6 +355,7 @@ class SubGymMarketsDailyInvestorEnv_v0(AbidesGymMarketsEnv):
 
 
         if not self.continuous_mode:
+            # Discrete action space
 
             if action == 0:
                 #return [{"type": "MKT", "direction": "BUY", "size": self.order_fixed_size}]
@@ -396,6 +371,7 @@ class SubGymMarketsDailyInvestorEnv_v0(AbidesGymMarketsEnv):
                 )
             
         else:
+            # Continuous action space
 
             action_value = action[0]
             size = round(action_value * self.order_fixed_size)
@@ -427,12 +403,9 @@ class SubGymMarketsDailyInvestorEnv_v0(AbidesGymMarketsEnv):
         
         last_transactions = raw_state["parsed_mkt_data"]["last_transaction"]
         self.last_transaction = last_transactions[-1]
-            # self.stop_price = self.last_transaction * (1-(self.trailing_percentage/100))
-        # print('lt', self.last_transaction)
 
         # 1) Holdings
         holdings = raw_state["internal_data"]["holdings"]
-        # print(holdings)
         self.holdings = holdings[-1]
         current_time = raw_state["internal_data"]["current_time"]
         self.current_time = current_time
@@ -471,8 +444,6 @@ class SubGymMarketsDailyInvestorEnv_v0(AbidesGymMarketsEnv):
         ]
         spreads = np.array(best_asks) - np.array(best_bids)
 
-        # print('BEST BIDS', best_bids)
-        # print('BEST ASKS', best_asks)
         self.best_bid = best_bids[-1]
         self.best_ask = best_asks[-1]
 
@@ -539,8 +510,8 @@ class SubGymMarketsDailyInvestorEnv_v0(AbidesGymMarketsEnv):
                 return 0
             
         else:
+            # Mean Deviation Penalty Reward Function
 
-            # Ippy stuff
             last_transaction = raw_state["parsed_mkt_data"]["last_transaction"]
 
             if not self.reward_deque:
